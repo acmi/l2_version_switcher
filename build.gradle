@@ -1,0 +1,27 @@
+group 'acmi.l2.clientmod'
+version '1.0'
+
+apply plugin: 'java'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile group: 'commons-io', name: 'commons-io', version: '2.4'
+    compile group: 'org.tukaani', name: 'xz', version: '1.5'
+}
+
+jar {
+    archiveName = "${rootProject.name}.jar"
+    
+    configurations.compile.collect {
+        from(zipTree(it)) {
+            exclude 'META-INF/**'
+        }
+    }
+
+    manifest {
+        attributes("Main-Class": "acmi.l2.clientmod.l2_version_switcher.Main")
+    }
+}
