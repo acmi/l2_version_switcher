@@ -75,7 +75,7 @@ public class Main {
         for (FileInfo fi : fileInfoList) {
             String filePath = separatorsToSystem(fi.getPath());
 
-            if (filter == null || !wildcardMatch(filePath, filter, IOCase.INSENSITIVE))
+            if (filter != null && !wildcardMatch(filePath, filter, IOCase.INSENSITIVE))
                 continue;
 
             System.out.print(filePath + ": ");
