@@ -22,14 +22,18 @@
 package acmi.l2.clientmod.l2_version_switcher;
 
 import org.apache.commons.io.IOCase;
-import org.apache.commons.io.input.CountingInputStream;
 
 import java.io.*;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 import static org.apache.commons.io.FilenameUtils.separatorsToSystem;
 import static org.apache.commons.io.FilenameUtils.wildcardMatch;
-import static org.apache.commons.io.IOUtils.copy;
 
 public class Main {
     public static void main(String[] args) {
@@ -72,53 +76,77 @@ public class Main {
         }
 
         File l2Folder = new File(System.getProperty("user.dir"));
-        for (FileInfo fi : fileInfoList) {
-            String filePath = separatorsToSystem(fi.getPath());
+        List<FileInfo> toUpdate = fileInfoList
+                .parallelStream()
+                .filter(fi -> {
+                    String filePath = separatorsToSystem(fi.getPath());
 
-            if (filter != null && !wildcardMatch(filePath, filter, IOCase.INSENSITIVE))
-                continue;
+                    if (filter != null && !wildcardMatch(filePath, filter, IOCase.INSENSITIVE))
+                        return false;
+                    File file = new File(l2Folder, filePath);
 
-            System.out.print(filePath + ": ");
-            File file = new File(l2Folder, filePath);
-            boolean update = true;
+                    try {
+                        if (file.exists() && file.length() == fi.getSize() && Util.hashEquals(file, fi.getHash())) {
+                            System.out.println(filePath + ": OK");
+                            return false;
+                        }
+                    } catch (IOException e) {
+                        System.out.println(filePath + ": couldn't check hash: " + e);
+                        return true;
+                    }
 
-            try {
-                if (file.exists() && file.length() == fi.getSize() && Util.hashEquals(file, fi.getHash())) {
-                    update = false;
-                }
-            } catch (IOException ignore) {
-            }
+                    System.out.println(filePath + ": need update");
+                    return true;
+                })
+                .collect(Collectors.toList());
 
-            if (update) {
-                File folder = file.getParentFile();
-                if (!folder.exists()) {
-                    folder.mkdirs();
-                }
+        List<String> errors = Collections.synchronizedList(new ArrayList<>());
+        ExecutorService executor = Executors.newFixedThreadPool(16);
+        CompletableFuture[] tasks = toUpdate
+                .stream()
+                .map(fi -> CompletableFuture.runAsync(() -> {
+                    String filePath = separatorsToSystem(fi.getPath());
+                    File file = new File(l2Folder, filePath);
 
-                try (InputStream input = new CountingInputStream(new BufferedInputStream(helper.getDownloadStream(fi.getPath()))) {
-                    @Override
-                    protected synchronized void afterRead(int n) {
-                        super.afterRead(n);
-
-                        if (getByteCount() % 0x100000 == 0) {
-                            System.out.print('.');
+                    File folder = file.getParentFile();
+                    if (!folder.exists()) {
+                        if (!folder.mkdirs()) {
+                            errors.add(filePath + ": couldn't create parent dir");
+                            return;
                         }
                     }
-                };
-                     OutputStream output = new BufferedOutputStream(new FileOutputStream(file))) {
-                    copy(Util.getUnzipStream(input), output);
-                    System.out.println("OK");
-                } catch (IOException e) {
-                    System.out.print("FAIL: ");
-                    System.out.print(e.getClass().getSimpleName());
-                    if (e.getMessage() != null) {
-                        System.out.print(": " + e.getMessage());
+
+                    try (InputStream input = Util.getUnzipStream(new BufferedInputStream(helper.getDownloadStream(fi.getPath())));
+                         OutputStream output = new BufferedOutputStream(new FileOutputStream(file))) {
+                        byte[] buffer = new byte[Math.min(fi.getSize(), 1 << 24)];
+                        int pos = 0;
+                        int r;
+                        while ((r = input.read(buffer, pos, buffer.length - pos)) >= 0) {
+                            pos += r;
+                            if (pos == buffer.length) {
+                                output.write(buffer, 0, pos);
+                                pos = 0;
+                            }
+                        }
+                        if (pos != 0) {
+                            output.write(buffer, 0, pos);
+                        }
+                        System.out.println(filePath + ": OK");
+                    } catch (IOException e) {
+                        String msg = filePath + ": FAIL: " + e.getClass().getSimpleName();
+                        if (e.getMessage() != null) {
+                            msg += ": " + e.getMessage();
+                        }
+                        errors.add(msg);
                     }
-                    System.out.println();
-                }
-            } else {
-                System.out.println("OK");
-            }
-        }
+                }, executor))
+                .toArray(CompletableFuture[]::new);
+        CompletableFuture
+                .allOf(tasks)
+                .thenRun(() -> {
+                    for (String err : errors)
+                        System.err.println(err);
+                    executor.shutdown();
+                });
     }
 }

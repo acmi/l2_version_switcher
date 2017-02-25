@@ -1,5 +1,5 @@
 group 'acmi.l2.clientmod'
-version '1.0'
+version '1.1'
 
 apply plugin: 'java'
 
@@ -8,8 +8,8 @@ repositories {
 }
 
 dependencies {
-    compile group: 'commons-io', name: 'commons-io', version: '2.4'
-    compile group: 'org.tukaani', name: 'xz', version: '1.5'
+    compile group: 'commons-io', name: 'commons-io', version: '2.5'
+    compile group: 'org.tukaani', name: 'xz', version: '1.6'
 }
 
 jar {
