@@ -23,9 +23,12 @@ package acmi.l2.clientmod.l2_version_switcher;
 
 import org.apache.commons.io.IOCase;
 
+import javax.imageio.ImageIO;
+import javax.swing.*;
+import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.io.*;
-import java.util.ArrayList;
-import java.util.Collections;
+import java.util.*;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -38,16 +41,16 @@ import static org.apache.commons.io.FilenameUtils.wildcardMatch;
 public class Main {
     public static void main(String[] args) {
         if (args.length != 3 && args.length != 4) {
-            System.out.println("USAGE: l2_version_switcher.jar host game version <filter>");
+            System.out.println("USAGE: l2_version_switcher.jar host game version <--splash> <filter>");
             System.out.println("EXAMPLE: l2_version_switcher.jar " + L2.NCWEST_HOST + " " + L2.NCWEST_GAME + " 1 \"system\\*\"");
             System.out.println("         l2_version_switcher.jar " + L2.PLAYNC_TEST_HOST + " " + L2.PLAYNC_TEST_GAME + " 48");
             System.exit(0);
         }
 
-        String host = args[0];
-        String game = args[1];
-        int version = Integer.parseInt(args[2]);
-        String filter = args.length == 4 ? separatorsToSystem(args[3]) : null;
+        List<String> argsList = new ArrayList<>(Arrays.asList(args));
+        String host = argsList.get(0);
+        String game = argsList.get(1);
+        int version = Integer.parseInt(argsList.get(2));
         Helper helper = new Helper(host, game, version);
         boolean available = false;
 
@@ -74,6 +77,60 @@ public class Main {
             System.err.println("Couldn\'t get file info map");
             System.exit(1);
         }
+
+        boolean splash = argsList.remove("--splash");
+        if (splash) {
+            Optional<FileInfo> splashObj = fileInfoList.stream()
+                    .filter(fi -> fi.getPath().contains("sp_32b_01.bmp"))
+                    .findAny();
+            if (splashObj.isPresent()) {
+                try (InputStream is = new FilterInputStream(Util.getUnzipStream(helper.getDownloadStream(splashObj.get().getPath()))) {
+                    @Override
+                    public int read() throws IOException {
+                        int b = super.read();
+                        if (b >= 0)
+                            b ^= 0x36;
+                        return b;
+                    }
+
+                    @Override
+                    public int read(byte[] b, int off, int len) throws IOException {
+                        int r = super.read(b, off, len);
+                        if (r >= 0) {
+                            for (int i = 0; i < r; i++)
+                                b[off + i] ^= 0x36;
+                        }
+                        return r;
+                    }
+                }) {
+                    new DataInputStream(is).readFully(new byte[28]);
+                    BufferedImage bi = ImageIO.read(is);
+
+                    JFrame frame = new JFrame("Lineage 2 [" + version + "] " + splashObj.get().getPath());
+                    frame.setContentPane(new JComponent() {
+                        {
+                            setPreferredSize(new Dimension(bi.getWidth(), bi.getHeight()));
+                        }
+
+                        @Override
+                        protected void paintComponent(Graphics g) {
+                            g.drawImage(bi, 0, 0, null);
+                        }
+                    });
+                    frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+                    frame.pack();
+                    frame.setLocationRelativeTo(null);
+                    frame.setVisible(true);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            } else {
+                System.out.println("Splash not found");
+            }
+            return;
+        }
+
+        String filter = argsList.size() > 3 ? separatorsToSystem(argsList.get(3)) : null;
 
         File l2Folder = new File(System.getProperty("user.dir"));
         List<FileInfo> toUpdate = fileInfoList
