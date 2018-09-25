@@ -88,7 +88,7 @@ public class Helper {
         private int part;
         private InputStream current;
 
-        public PartsInputStream(String path) throws IOException {
+        PartsInputStream(String path) throws IOException {
             this.path = path;
             this.current = nextStream();
         }
